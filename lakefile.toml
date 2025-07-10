@@ -1,0 +1,23 @@
+name = "zkinet"
+version = "0.1.0"
+defaultTargets = ["zkinet"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+autoImplicit = false
+
+[[lean_lib]]
+name = "Zkinet"
+
+[[lean_exe]]
+name = "zkinet"
+root = "Main"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[require]]
+name = "batteries"
+scope = "leanprover-community"
+rev = "main"
