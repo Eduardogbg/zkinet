@@ -14,6 +14,40 @@ structure NodeContext (α : Type) where
   /-- maps a node type to its arity of negative polarity -/
   neg_ports: node_types → ℕ
 
+inductive Polarity where
+  | pos : Polarity
+  | neg : Polarity
+  deriving DecidableEq, Repr
+
+def Polarity.flip : Polarity → Polarity
+  | Polarity.pos => Polarity.neg
+  | Polarity.neg => Polarity.pos
+
+@[simp]
+lemma flip_flip_is_id (pol : Polarity) : pol.flip.flip = pol := by
+  cases pol <;> rfl
+
+def port_range
+  {ctx: NodeContext α}
+  (t : ctx.node_types)
+  (port_pol: Polarity) : Type
+  := Fin (match port_pol with
+    | Polarity.pos => ctx.pos_ports t
+    | Polarity.neg => ctx.neg_ports t)
+
+-- TODO: I still would prefer if these defs were inside InteractionNet but :shrug:
+/-- dependent product type between a node and a index for one of its positive ports -/
+def PosPort
+  {ctx: NodeContext α}
+  {nodes: Finset ℕ}
+  (assign_node_type: nodes → ctx.node_types): Type := (n: nodes) × (Fin (ctx.pos_ports (assign_node_type n)))
+
+/-- dependent product type between a node and a index for one of its negative ports -/
+def NegPort
+  {ctx: NodeContext α}
+  {nodes: Finset ℕ}
+  (assign_node_type: nodes → ctx.node_types): Type := (n: nodes) × (Fin (ctx.neg_ports (assign_node_type n)))
+
 /--
   an interaction net is a set of nodes and a wiring between their ports
   (one of the most obvious definitions we'll have)
@@ -24,12 +58,64 @@ structure InteractionNet (ctx: NodeContext α) where
   /-- a mapping that associates each node to its respective type -/
   assign_node_type: nodes → ctx.node_types
 
-  /-- dependent product type between a node and a index for one of its positive ports -/
-  PosPort: Type := (n: nodes) × (Fin (ctx.pos_ports (assign_node_type n)))
-  /-- dependent product type between a node and a index for one of its negative ports -/
-  NegPort: Type := (n: nodes) × (Fin (ctx.neg_ports (assign_node_type n)))
-  /-- a bijection wiring together all positive and negative ports in the net -/
-  wiring: PosPort ≃ NegPort
+  wiring: (PosPort assign_node_type) ≃ (NegPort assign_node_type)
+
+-- TODO: maybe we need to move `has_principal_{pos,neg}` to these as well
+-- that would suck tho. but I don't think this is necessary to the well-formedness
+-- of the rules.
+/--
+  a disjoint sum of the types of ports to be interpreted as
+  boundary ports of positive polarity of the rule. these are:
+  1. the non-principal positive ports of the positive node
+  2. all the positive ports of the negative node
+
+  these are given as indices, and implicitly the first entry's ports
+  should be shifted by 1, as 0 is the principal port and the
+  first entry only has boundary non-pricipal ports.
+-/
+def BoundPos
+  {ctx: NodeContext α}
+  (pos_node_type: ctx.node_types)
+  (neg_node_type: ctx.node_types): Type :=
+      (Fin (ctx.pos_ports pos_node_type - 1))
+    ⊕ (Fin (ctx.pos_ports neg_node_type))
+
+/--
+  a disjoint sum of the types of ports to be interpreted as
+  boundary ports of negative polarity of the rule. these are:
+  1. the non-principal negative ports of the negative node
+  2. all the negative ports of the positive node
+
+  these are given as indices, and implicitly the first entry's ports
+  should be shifted by 1, as 0 is the principal port and the
+  first entry only has boundary non-pricipal ports.
+-/
+def BoundNeg
+  {ctx: NodeContext α}
+  (pos_node_type: ctx.node_types)
+  (neg_node_type: ctx.node_types): Type :=
+      (Fin (ctx.neg_ports neg_node_type - 1))
+    ⊕ (Fin (ctx.neg_ports pos_node_type))
+
+/--
+  the ports of output nodes of positive polarity, given as a product of a node's
+  index and its positive ports indices.
+-/
+def OutPos
+  {ctx: NodeContext α}
+  {output_nodes: Finset ℕ}
+  (o: output_nodes → ctx.node_types): Type :=
+    (n: output_nodes) × Fin (ctx.pos_ports (o n))
+
+/--
+  the output ports of positive polarity, given as a product of a node's
+  index and its negative ports indices.
+-/
+def OutNeg
+  {ctx: NodeContext α}
+  {output_nodes: Finset ℕ}
+  (o: output_nodes → ctx.node_types): Type :=
+    (n: output_nodes) × Fin (ctx.neg_ports (o n))
 
 /--
   an interaction rule describes how to patch a net when a given pair of node types
@@ -52,44 +138,6 @@ structure InteractionRule (ctx: NodeContext α) where
   o: output_nodes → ctx.node_types
 
   /--
-    a disjoint sum of the types of ports to be interpreted as
-    boundary ports of positive polarity of the rule. these are:
-    1. the non-principal positive ports of the positive node
-    2. all the positive ports of the negative node
-
-    these are given as indices, and implicitly the first entry's ports
-    should be shifted by 1, as 0 is the principal port and the
-    first entry only has boundary non-pricipal ports.
-  -/
-  BoundPos: Type :=
-    (Fin (ctx.pos_ports pos_node_type - 1))
-    ⊕ (Fin (ctx.pos_ports neg_node_type))
-  /--
-    a disjoint sum of the types of ports to be interpreted as
-    boundary ports of negative polarity of the rule. these are:
-    1. the non-principal negative ports of the negative node
-    2. all the negative ports of the positive node
-
-    these are given as indices, and implicitly the first entry's ports
-    should be shifted by 1, as 0 is the principal port and the
-    first entry only has boundary non-pricipal ports.
-  -/
-  BoundNeg: Type :=
-    (Fin (ctx.neg_ports neg_node_type - 1))
-    ⊕ (Fin (ctx.neg_ports pos_node_type))
-
-  /--
-    the ports of output nodes of positive polarity, given as a product of a node's
-    index and its positive ports indices.
-  -/
-  OutPos: Type := (n: output_nodes) × Fin (ctx.pos_ports (o n))
-  /--
-    the output ports of positive polarity, given as a product of a node's
-    index and its negative ports indices.
-  -/
-  OutNeg: Type := (n: output_nodes) × Fin (ctx.neg_ports (o n))
-
-  /--
     "a bijection i : B− + O+ → B+ + O− wiring each positive (output or boundary)
     port onto a negative (output or boundary) port.
 
@@ -103,7 +151,15 @@ structure InteractionRule (ctx: NodeContext α) where
     and their ports will have flipped polarities. in that sense, the boundary ports
     are not connecting to ports of same trace polarity, but of opposite ones
   -/
-  i: (BoundNeg ⊕ OutPos) ≃ (BoundPos ⊕ OutNeg)
+  i:
+      (BoundNeg pos_node_type neg_node_type ⊕ OutPos o)
+    ≃ (BoundPos pos_node_type neg_node_type ⊕ OutNeg o)
+
+def InteractionRule.Ports
+  {ctx: NodeContext α}
+  (rule: InteractionRule ctx): Type :=
+    (BoundNeg rule.pos_node_type rule.neg_node_type ⊕ OutPos rule.o)
+  ⊕ (BoundPos rule.pos_node_type rule.neg_node_type ⊕ OutNeg rule.o)
 
 structure TraceSetting (α β : Type) (ctx: NodeContext α) where
   /-- a finite set of labels for rule names that could appear on the trace -/
@@ -188,27 +244,6 @@ def node_level
   | ⟨_, Sum.inr (Sum.inl _)⟩ => trace.num_steps + 1  -- ending net
   | ⟨_, Sum.inr (Sum.inr (Sum.inl s))⟩ => s.val + 1  -- pos input
   | ⟨_, Sum.inr (Sum.inr (Sum.inr s))⟩ => s.val + 1  -- neg input
-
-inductive Polarity where
-  | pos : Polarity
-  | neg : Polarity
-  deriving DecidableEq, Repr
-
-def Polarity.flip : Polarity → Polarity
-  | Polarity.pos => Polarity.neg
-  | Polarity.neg => Polarity.pos
-
-@[simp]
-lemma flip_flip_is_id (pol : Polarity) : pol.flip.flip = pol := by
-  cases pol <;> rfl
-
-def port_range
-  {ctx: NodeContext α}
-  (t : ctx.node_types)
-  (port_pol: Polarity) : Type
-  := Fin (match port_pol with
-      | Polarity.pos => ctx.pos_ports t
-      | Polarity.neg => ctx.neg_ports t)
 
 /--
   a trace node is a node in a trace (duh)
@@ -347,29 +382,12 @@ def is_principal_port
   (p : TracePort trace) : Bool :=
   p.port.val = 0
 
--- Helper to get the type of a node in the starting net
-def start_node_type
-  {ctx: NodeContext α}
-  {ts: TraceSetting α β ctx}
-  {trace: InteractionTrace ctx ts}
-  (n : trace.net_start.nodes) : ctx.node_types :=
-  trace.net_start.assign_node_type n
-
--- Helper to get the type of a node in the ending net
-def end_node_type
-  {ctx: NodeContext α}
-  {ts: TraceSetting α β ctx}
-  {trace: InteractionTrace ctx ts}
-  (n : trace.net_end.nodes) : ctx.node_types :=
-  trace.net_end.assign_node_type n
-
 def start_port_to_trace_port
   {ctx: NodeContext α}
   {ts: TraceSetting α β ctx}
   {trace: InteractionTrace ctx ts}
   -- TODO: this is horrible, I wish there was a neat way to refactor the Pos/NegNode types
-  : ((n : trace.net_start.nodes) × Fin (ctx.pos_ports (trace.net_start.assign_node_type n))) ⊕
-    ((n : trace.net_start.nodes) × Fin (ctx.neg_ports (trace.net_start.assign_node_type n)))
+  : (PosPort trace.net_start.assign_node_type) ⊕ (NegPort trace.net_start.assign_node_type)
     → TracePort trace
   | Sum.inl ⟨n, p⟩ =>
       let t := trace.net_start.assign_node_type n
@@ -382,12 +400,211 @@ def end_port_to_trace_port
   {ctx: NodeContext α}
   {ts: TraceSetting α β ctx}
   {trace: InteractionTrace ctx ts}
-  : ((n : trace.net_end.nodes) × Fin (ctx.pos_ports (trace.net_end.assign_node_type n))) ⊕
-    ((n : trace.net_end.nodes) × Fin (ctx.neg_ports (trace.net_end.assign_node_type n)))
+  : (PosPort trace.net_end.assign_node_type) ⊕ (NegPort trace.net_end.assign_node_type)
     → TracePort trace
   | Sum.inl ⟨n, p⟩ =>
-      let t := trace.net_end.assign_node_type n
-      ⟨⟨t, Sum.inr (Sum.inl ⟨n, rfl⟩)⟩, Polarity.pos, p⟩
+    let t := trace.net_end.assign_node_type n
+    ⟨⟨t, Sum.inr (Sum.inl ⟨n, rfl⟩)⟩, Polarity.pos, p⟩
   | Sum.inr ⟨n, p⟩ =>
-      let t := trace.net_end.assign_node_type n
-      ⟨⟨t, Sum.inr (Sum.inl ⟨n, rfl⟩)⟩, Polarity.neg, p⟩
+    let t := trace.net_end.assign_node_type n
+    ⟨⟨t, Sum.inr (Sum.inl ⟨n, rfl⟩)⟩, Polarity.neg, p⟩
+
+def output_port_to_rule_port
+  {ctx: NodeContext α}
+  {rule: InteractionRule ctx}
+  (pol: Polarity)
+  (n: rule.output_nodes)
+  (p: port_range (rule.o n) pol)
+  : rule.Ports :=
+  match pol with
+  | Polarity.pos => Sum.inl (Sum.inr ⟨n, p⟩)
+  | Polarity.neg => Sum.inr (Sum.inr ⟨n, p⟩)
+
+def rule_port_to_trace_port
+  {ctx: NodeContext α}
+  {ts: TraceSetting α β ctx}
+  {trace: InteractionTrace ctx ts}
+  (s: Fin trace.num_steps)
+  (port: (ts.rules (trace.steps s)).Ports)
+  : TracePort trace :=
+  let rule := ts.rules (trace.steps s)
+  match port with
+  -- BoundNeg: negative boundary port
+  | Sum.inl (Sum.inl boundary_neg) =>
+    match boundary_neg with
+    -- non-principal negative port of negative input (shift by 1)
+    | Sum.inl p =>
+      ⟨
+        ⟨rule.neg_node_type, Sum.inr (Sum.inr (Sum.inr ⟨s, rfl⟩))⟩,
+        Polarity.neg,
+        ⟨
+          p.val + 1,
+          by
+            have : p.val < ctx.neg_ports rule.neg_node_type - 1 := p.isLt
+            simp only
+            omega
+        ⟩
+      ⟩
+    -- negative port of positive input
+    | Sum.inr p =>
+      ⟨
+        ⟨rule.pos_node_type, Sum.inr (Sum.inr (Sum.inl ⟨s, rfl⟩))⟩,
+        Polarity.neg,
+        p
+      ⟩
+  -- OutPos: positive output port
+  | Sum.inl (Sum.inr out_pos) =>
+    let ⟨n, p⟩ := out_pos
+    ⟨
+      ⟨rule.o n, Sum.inl (Sum.inr ⟨s, n, rfl⟩)⟩,
+      Polarity.pos,
+      p
+    ⟩
+  -- BoundPos: positive boundary port
+  | Sum.inr (Sum.inl boundary_pos) =>
+    match boundary_pos with
+    -- non-principal positive port of positive input (shift by 1)
+    | Sum.inl p =>
+      ⟨
+        ⟨rule.pos_node_type, Sum.inr (Sum.inr (Sum.inl ⟨s, rfl⟩))⟩,
+        Polarity.pos,
+        ⟨
+          p.val + 1,
+          by
+            have : p.val < ctx.pos_ports rule.pos_node_type - 1 := p.isLt
+            simp
+            omega
+        ⟩
+      ⟩
+    -- positive port of negative input
+    | Sum.inr p =>
+      ⟨
+        ⟨rule.neg_node_type, Sum.inr (Sum.inr (Sum.inr ⟨s, rfl⟩))⟩,
+        Polarity.pos,
+        p
+      ⟩
+  -- OutNeg: negative output port
+  | Sum.inr (Sum.inr out_neg) =>
+    let ⟨n, p⟩ := out_neg
+    ⟨
+      ⟨rule.o n, Sum.inl (Sum.inr ⟨s, n, rfl⟩)⟩,
+      Polarity.neg,
+      p
+    ⟩
+
+-- r_star follows wirings within each level
+def r_star
+  {ctx: NodeContext α}
+  {ts: TraceSetting α β ctx}
+  (trace: InteractionTrace ctx ts)
+  : TracePort trace → TracePort trace
+
+  -- starting net, positive port
+  | ⟨⟨t, Sum.inl (Sum.inl n)⟩, Polarity.pos, port⟩ =>
+    let wired := trace.net_start.wiring ⟨n, n.property.symm ▸ port⟩
+    start_port_to_trace_port (Sum.inr wired)
+
+  -- starting net, negative port
+  | ⟨⟨t, Sum.inl (Sum.inl n)⟩, Polarity.neg, port⟩ =>
+    let wired := trace.net_start.wiring.symm ⟨n, n.property.symm ▸ port⟩
+    start_port_to_trace_port (Sum.inl wired)
+
+  -- ending net, positive port
+  | ⟨⟨t, Sum.inr (Sum.inl n)⟩, Polarity.pos, port⟩ =>
+    let wired := trace.net_end.wiring ⟨n, n.property.symm ▸ port⟩
+    end_port_to_trace_port (Sum.inr wired)
+
+  -- ending net, negative port
+  | ⟨⟨t, Sum.inr (Sum.inl n)⟩, Polarity.neg, port⟩ =>
+    let wired := trace.net_end.wiring.symm ⟨n, n.property.symm ▸ port⟩
+    end_port_to_trace_port (Sum.inl wired)
+
+  -- output nodes from steps
+  | ⟨⟨t, Sum.inl (Sum.inr ⟨s, output_node⟩)⟩, pol, port⟩ =>
+    let rule := ts.rules (trace.steps s)
+    let rule_port := output_port_to_rule_port pol output_node.val (output_node.property.symm ▸ port)
+    match rule_port with
+    | Sum.inl p =>
+      let wired := rule.i p
+      rule_port_to_trace_port s (Sum.inr wired)
+    | Sum.inr p =>
+      let wired := rule.i.symm p
+      rule_port_to_trace_port s (Sum.inl wired)
+
+  -- positive input node, positive port
+  | ⟨⟨t, Sum.inr (Sum.inr (Sum.inl s))⟩, Polarity.pos, port⟩ =>
+    let rule := ts.rules (trace.steps s)
+    if h : port.val = 0 then
+      -- principal port
+      ⟨
+        ⟨rule.neg_node_type, Sum.inr (Sum.inr (Sum.inr ⟨s, rfl⟩))⟩,
+        Polarity.neg,
+        ⟨0, rule.has_principal_neg⟩
+      ⟩
+    else
+      -- non-principal port
+      let boundary_port : BoundPos rule.pos_node_type rule.neg_node_type :=
+        Sum.inl ⟨
+          port.val - 1,
+          by
+            simp at port
+            have isLt : port.val < ctx.pos_ports t := port.isLt
+            have : t = rule.pos_node_type := s.property.symm
+            simp only [this] at isLt
+            omega
+        ⟩
+      -- let rule_port : rule.Ports := Sum.inr (Sum.inl boundary_port)
+      let wired := rule.i.symm (Sum.inl boundary_port)
+      rule_port_to_trace_port s (Sum.inl wired)
+
+  -- positive input node, negative port
+  | ⟨⟨t, Sum.inr (Sum.inr (Sum.inl s))⟩, Polarity.neg, port⟩ =>
+    let step := s.val
+    let rule := ts.rules (trace.steps step)
+    -- all negative ports of positive input are boundary (no principal to exclude)
+    let boundary_port : BoundNeg rule.pos_node_type rule.neg_node_type :=
+      Sum.inr (s.property.symm ▸ port)
+    let wired := rule.i (Sum.inl boundary_port)
+    rule_port_to_trace_port step (Sum.inr wired)
+
+  -- negative input node, positive port
+  | ⟨⟨t, Sum.inr (Sum.inr (Sum.inr s))⟩, Polarity.pos, port⟩ =>
+    let step := s.val
+    let rule := ts.rules (trace.steps step)
+
+    -- all positive ports of negative input are boundary
+    let boundary_port : BoundPos rule.pos_node_type rule.neg_node_type :=
+      Sum.inr (s.property.symm ▸ port)
+    let wired := rule.i.symm (Sum.inl boundary_port)
+    rule_port_to_trace_port step (Sum.inl wired)
+
+  -- negative input node, negative port
+  | ⟨⟨t, Sum.inr (Sum.inr (Sum.inr s))⟩, Polarity.neg, port⟩ =>
+    let step := s.val
+    let rule := ts.rules (trace.steps step)
+
+    if h : port.val = 0 then
+      -- principal negative connects to principal positive
+      ⟨⟨rule.pos_node_type, Sum.inr (Sum.inr (Sum.inl ⟨step, rfl⟩))⟩,
+        Polarity.pos, ⟨0, rule.has_principal_pos⟩⟩
+    else
+      -- non-principal negative port → BoundNeg (first case)
+      let boundary_port : BoundNeg rule.pos_node_type rule.neg_node_type :=
+        Sum.inl ⟨
+          port.val - 1,
+          by
+            have isLt : port.val < ctx.neg_ports t := port.isLt
+            have : t = rule.neg_node_type := s.property.symm
+            simp only [this] at isLt
+            omega
+        ⟩
+      let wired := rule.i (Sum.inl boundary_port)
+      rule_port_to_trace_port step (Sum.inr wired)
+
+lemma net_wiring_involutive
+  {ctx: NodeContext α}
+  (net : InteractionNet ctx) :
+  ∀ p : PosPort net.assign_node_type,
+    net.wiring.symm (net.wiring p) = p := fun _p => Equiv.symm_apply_apply _ _
+
+-- proving r* is injective is going to be a fucking ride...
